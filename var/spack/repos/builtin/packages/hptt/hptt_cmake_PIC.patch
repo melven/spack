@@ -1,0 +1,12 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 582ada3..65feef7 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -38,6 +38,7 @@ endif()
+ set(HPTT_SRCS src/hptt.cpp src/plan.cpp src/transpose.cpp src/utils.cpp)
+ 
+ add_library(hptt STATIC ${HPTT_SRCS})
++set_target_properties(hptt PROPERTIES POSITION_INDEPENDENT_CODE On)
+ target_compile_features(hptt PUBLIC cxx_std_11)
+ target_include_directories(hptt PUBLIC ${PROJECT_SOURCE_DIR}/include)
+ #target_compile_definitions(hptt PRIVATE ${HPTT_CXX_COMPILE_DEFS})
