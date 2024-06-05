@@ -26,6 +26,8 @@ class Julia(MakefilePackage):
     maintainers("vchuravy", "haampie", "giordano")
 
     version("master", branch="master")
+    version("1.10.4", sha256="c46ed8166fe860a7258d088a0add68dfdf11ad64cc4c0b1f113570862d3ef777")
+    version("1.10.3", sha256="b3cd34c839d25b98a162070b4e3abd5f34564ffdad13e07073be7885e5678a18")
     version("1.10.2", sha256="e3d20c02975da054aeb18d32ed84c5d760d54d2563e45e25017684a5a105d185")
     version("1.9.3", sha256="8d7dbd8c90e71179e53838cdbe24ff40779a90d7360e29766609ed90d982081d")
     version("1.9.2", sha256="015438875d591372b80b09d01ba899657a6517b7c72ed41222298fef9d4ad86b")
@@ -49,6 +51,7 @@ class Julia(MakefilePackage):
 
     variant("precompile", default=True, description="Improve julia startup time")
     variant("openlibm", default=True, description="Use openlibm instead of libm")
+    variant("mkl_patch", default=False, description="Patch to build with intel-oneapi-mkl instead of openblas", when="@1.7:")
 
     # Note, we just use link_llvm_dylib so that we not only get a libLLVM,
     # but also so that llvm-config --libfiles gives only the dylib. Without
@@ -74,9 +77,10 @@ class Julia(MakefilePackage):
         depends_on("llvm@15.0.7 +lld shlib_symbol_version=JL_LLVM_15.0")
         depends_on("mbedtls@2.28.2:2.28")
         depends_on("openlibm@0.8.1:0.8", when="+openlibm")
-        depends_on("nghttp2@1.52.0:1.52")
+        #depends_on("nghttp2@1.52.0:1.52")
+        depends_on("nghttp2@1.52.0:")
         depends_on("curl@8.4.0:")
-        depends_on("suite-sparse@7.2.1")
+        depends_on("suite-sparse@7.2.1:7.2.2")
 
     with when("@1.9.0:1.9"):
         # libssh2.so.1, libpcre2-8.so.0, mbedtls.so.14, mbedcrypto.so.7, mbedx509.so.1
@@ -196,18 +200,19 @@ class Julia(MakefilePackage):
     depends_on("which", type="build")  # for detecting 7z, lld, dsymutil
     depends_on("python", type="build")
 
-    depends_on("blas")  # note: for now openblas is fixed...
+    depends_on("blas", when="~mkl_patch")  # note: for now openblas is fixed...
     depends_on("curl tls=mbedtls +nghttp2 +libssh2")
     depends_on("dsfmt@2.2.4:")  # apparently 2.2.3->2.2.4 breaks API
     depends_on("gmp")
-    depends_on("lapack")  # note: for now openblas is fixed...
+    depends_on("lapack", when="~mkl_patch")  # note: for now openblas is fixed...
     depends_on("libblastrampoline", when="@1.7.0:")
     depends_on("libgit2")
     depends_on("libssh2 crypto=mbedtls")
     depends_on("mbedtls libs=shared")
     depends_on("mpfr")
     depends_on("nghttp2")
-    depends_on("openblas +ilp64 symbol_suffix=64_")
+    depends_on("openblas +ilp64 symbol_suffix=64_", when="~mkl_patch")
+    depends_on("intel-oneapi-mkl", when="+mkl_patch")
     depends_on("openlibm", when="+openlibm")
     depends_on("p7zip")
     depends_on("pcre2")
@@ -270,6 +275,15 @@ class Julia(MakefilePackage):
         if os.path.exists(f):
             time = (os.path.getatime(f), os.path.getmtime(f))
             os.utime(os.path.join("base", "Makefile"), time)
+        if "+mkl_patch" in self.spec:
+            filter_file(
+                    "using OpenBLAS_jll",
+                    "#using OpenBLAS_jll",
+                    "stdlib/LinearAlgebra/src/LinearAlgebra.jl")
+            filter_file(
+                    "BLAS\.lbt_forward\(OpenBLAS_jll\.libopenblas_path; clear=true\)",
+                    "BLAS.lbt_forward(\"libmkl_rt.so\"; clear=true, suffix_hint=\"64\")",
+                    "stdlib/LinearAlgebra/src/LinearAlgebra.jl")
 
     def setup_build_environment(self, env):
         # this is a bit ridiculous, but we are setting runtime linker paths to
@@ -290,13 +304,17 @@ class Julia(MakefilePackage):
             "mbedtls",
             "mpfr",
             "nghttp2",
-            "openblas",
             "pcre2",
             "suite-sparse",
             "utf8proc",
         ]
+        if "~mkl_patch" in self.spec:
+            pkgs.append("openblas")
+        else:
+            pkgs.append("intel-oneapi-mkl")
         if "+openlibm" in self.spec:
             pkgs.append("openlibm")
+            env.set("MKL_THREADING_LAYER", "sequential")
         if self.spec.satisfies("@1.7.0:"):
             pkgs.append("libblastrampoline")
         for pkg in pkgs:
@@ -309,6 +327,9 @@ class Julia(MakefilePackage):
         # TODO: use a search query for blas / lapack?
         libblas = os.path.splitext(spec["blas"].libs.basenames[0])[0]
         liblapack = os.path.splitext(spec["lapack"].libs.basenames[0])[0]
+        if "+mkl_patch" in self.spec:
+            libblas = "libmkl_rt"
+            liblapack = "libmkl_rt"
 
         # Host compiler target name
         march = get_best_target(spec.target, spec.compiler.name, spec.compiler.version)
